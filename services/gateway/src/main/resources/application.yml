@@ -8,6 +8,32 @@ spring:
   reactor:
     # MDC (traceId) must follow the request across Reactor/Netty threads.
     context-propagation: auto
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # I14 + architecture §5.1 deadline budget: browser 10 s > gateway response 5 s > internal calls.
+          # No gateway retries: POST is not idempotent at the HTTP layer (I1 handles replays).
+          httpclient:
+            # Default 30 s. Local/compose network: a healthy connect takes well under 10 ms.
+            connect-timeout: 1000
+            # Default is NONE (wait forever). Time to response headers; exceeded → 504.
+            response-timeout: 5s
+            pool:
+              # Default NONE: a pooled connection the downstream already closed (Tomcat
+              # keep-alive 60 s) gets reused → "Connection prematurely closed". Stay below it.
+              max-idle-time: 15s
+          # Paths are forwarded unchanged: /api/{service}/v{n}/... (architecture §8), so a
+          # version bump needs no gateway change. /ws joins at P4.C1 with its own timeout.
+          routes:
+            - id: auth-service
+              uri: ${AUTH_SERVICE_URI:http://localhost:8081}
+              predicates:
+                - Path=/api/auth/**
+            - id: chat-service
+              uri: ${CHAT_SERVICE_URI:http://localhost:8082}
+              predicates:
+                - Path=/api/chat/**
 server:
   port: ${SERVER_PORT:8080}
   # Boot 3.5 default; explicit because I10 depends on it.

@@ -1,5 +1,6 @@
 package dev.chatconnect.gateway.observability;
 
+import dev.chatconnect.gateway.error.GatewayProblem;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.contextpropagation.ObservationThreadLocalAccessor;
 import io.micrometer.tracing.Span;
@@ -9,7 +10,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
-import org.springframework.web.ErrorResponse;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
@@ -32,6 +32,8 @@ import reactor.core.publisher.Mono;
 public class RequestTraceFilter implements WebFilter, Ordered {
 
     public static final String TRACE_ID_HEADER = "X-Trace-Id";
+    /** Exchange attribute holding the trace-id, read by the problem+json error handler. */
+    public static final String TRACE_ID_ATTRIBUTE = RequestTraceFilter.class.getName() + ".traceId";
     /** nginx convention: the client went away before the response completed. */
     static final int CLIENT_CLOSED_REQUEST = 499;
     private static final String PROBE_PATH_PREFIX = "/actuator/health";
@@ -55,13 +57,19 @@ public class RequestTraceFilter implements WebFilter, Ordered {
             Observation observation = context.getOrDefault(ObservationThreadLocalAccessor.KEY, null);
             String traceId = traceIdOf(observation);
             if (traceId != null) {
-                // set(), not add(): proxied responses (P1.C3) may copy a downstream X-Trace-Id.
-                exchange.getResponse().getHeaders().set(TRACE_ID_HEADER, traceId);
+                exchange.getAttributes().put(TRACE_ID_ATTRIBUTE, traceId);
+                // At commit, so the edge value wins over a downstream X-Trace-Id copied into a
+                // proxied response, and survives error handlers rewriting the response.
+                exchange.getResponse().beforeCommit(() -> {
+                    exchange.getResponse().getHeaders().set(TRACE_ID_HEADER, traceId);
+                    return Mono.empty();
+                });
             }
             long startNanos = System.nanoTime();
             return chain.filter(exchange)
                     .doOnSuccess(ignored -> logCompletion(exchange, observation, statusOf(exchange), startNanos))
-                    .doOnError(error -> logCompletion(exchange, observation, statusOf(error), startNanos))
+                    .doOnError(error -> logCompletion(
+                            exchange, observation, GatewayProblem.of(error).status().value(), startNanos))
                     .doOnCancel(() -> logCompletion(exchange, observation, CLIENT_CLOSED_REQUEST, startNanos));
         });
     }
@@ -79,11 +87,6 @@ public class RequestTraceFilter implements WebFilter, Ordered {
     private static int statusOf(ServerWebExchange exchange) {
         HttpStatusCode status = exchange.getResponse().getStatusCode();
         return status == null ? 200 : status.value();
-    }
-
-    /** The error handler that renders the response runs outside this filter; mirror its status choice. */
-    private static int statusOf(Throwable error) {
-        return error instanceof ErrorResponse response ? response.getStatusCode().value() : 500;
     }
 
     private void logCompletion(ServerWebExchange exchange, Observation observation, int status, long startNanos) {

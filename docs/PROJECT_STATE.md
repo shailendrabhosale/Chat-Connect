@@ -1,7 +1,7 @@
 # PROJECT_STATE (the only memory, MP §5)
 
-**Last done:** P1.C2: actuator liveness/readiness, ECS JSON logs, Micrometer Tracing (OTel bridge, W3C only, no exporter), `X-Trace-Id` response header + ECS access log, explicit graceful shutdown (20 s/phase), ADR-003. AT: readiness `{"status":"UP"}` via curl on 8080/8081/8082; 55/55 log lines JSON; every request line carries the response's traceId; SIGTERM → graceful. `./mvnw -q verify` green (45 tests) · 2026-11-27 · branch `p1-c2`
-**Next:** `GO P1.C3` (gateway static routes `/api/auth/**`, `/api/chat/**`, timeouts)
+**Last done:** P1.C3: gateway static routes `/api/auth/**` → auth, `/api/chat/**` → chat (paths unchanged, no retries); connect 1 s, response 5 s, pool idle 15 s; RFC 7807 edge errors (503/504/502/404/500, `Cache-Control: no-store`, no internal addresses); `GET /api/{auth,chat}/v1/ping`; ADR-023. AT: `curl :8080/api/{chat,auth}/v1/ping` → 200, with the same traceId in the gateway and service logs. `./mvnw -q verify` green (72 tests) · 2026-11-27 · branch `p1-c3`
+**Next:** `GO P1.C4` (multi-stage Dockerfiles, compose `core` profile, healthchecks, mem limits, ADR-004; closes DEBT-4)
 **Version / tag:** pre-V1 · none
 
 ## Stack pins (I16; recorded in ADR-002)
@@ -42,9 +42,9 @@
 ## Services
 | Name | Module | Port | DB | Replicas | State |
 |---|---|---|---|---|---|
-| gateway | `services/gateway` (Spring Cloud Gateway, WebFlux) | 8080 | — | 1 | probes + trace header + ECS logs; no routes (P1.C3) |
-| auth-service | `services/auth-service` (Spring MVC) | 8081 | — (PG at P2) | 1 | probes + trace header + ECS logs |
-| chat-service | `services/chat-service` (Spring MVC) | 8082 | — (PG at P3) | 1 | probes + trace header + ECS logs |
+| gateway | `services/gateway` (Spring Cloud Gateway, WebFlux) | 8080 | — | 1 | routes `/api/auth/**`, `/api/chat/**`; timeouts + RFC 7807 edge errors (ADR-023) |
+| auth-service | `services/auth-service` (Spring MVC) | 8081 | — (PG at P2) | 1 | `GET /api/auth/v1/ping` |
+| chat-service | `services/chat-service` (Spring MVC) | 8082 | — (PG at P3) | 1 | `GET /api/chat/v1/ping` |
 
 Endpoints on every service: `/actuator/health/liveness`, `/actuator/health/readiness` (only `health` exposed). Every response carries `X-Trace-Id`.
 Package root `dev.chatconnect.*`; groupId `dev.chatconnect`; version `0.1.0-SNAPSHOT`.
@@ -62,6 +62,8 @@ none (P2).
 | APP_ENV | all | no | ECS `service.environment`; default `local` |
 | TRACING_SAMPLING_PROBABILITY | all | no | default `1.0`; prod 0.1 at P20 (trace IDs are logged even when unsampled) |
 | HOSTNAME | all (read) | no | ECS `service.node.name`; set by Docker/K8s; default `local` |
+| AUTH_SERVICE_URI | gateway | no | route target; default `http://localhost:8081`; compose sets the service DNS name (P1.C4) |
+| CHAT_SERVICE_URI | gateway | no | route target; default `http://localhost:8082`; compose sets the service DNS name (P1.C4) |
 
 ## Compose profiles
 none (`core` at P1.C4).
@@ -69,16 +71,23 @@ none (`core` at P1.C4).
 ## Measurements
 | Metric | Value | Command | Env | Date |
 |---|---|---|---|---|
+| gateway hung-connect → 503 | ~1.03 s (warm), one attempt | `GatewayConnectTimeoutTest` (`@RepeatedTest(3)` probe) | WSL2, local jars | 2026-11-27 |
+| gateway slow-upstream → 504 | 5.003–5.045 s gateway-side | 3 × `curl :8090/api/chat/v1/ping` against a 7 s stub; ECS `event.duration` + monotonic wrapper | WSL2, local jars | 2026-11-27 |
+
+**Measurement rule (I15):** on this host, curl 8.5.0's `time_total` under-reports by 0.2–0.4 s (4.62–4.80 s against 5.00 s server-side). Take timings from server-side durations or a monotonic wrapper, never from curl.
 
 ## Known debt
 | ID | Item | Fix-by |
 |---|---|---|
 | ~~DEBT-2~~ | ~~I10 not in the shells~~: closed at P1.C2 | done |
 | DEBT-3 | gateway `/actuator/health` reachable on the public port (details-free); Caddy must block `/actuator/*` | P6.C2 |
+| DEBT-5 | SCG appends the client's `X-Forwarded-For`; IP-keyed logic (login throttle, rate limits) must use the right-most trusted hop, never the left-most | P2.C2 |
+| DEBT-6 | Deadline nesting: architecture §5.1 proposes PG `statement_timeout` 5 s + pool acquire 2 s behind a 5 s gateway timeout, which breaks §5.1's own rule. Set e.g. acquire 1 s, `statement_timeout` 3 s | P2.C1 |
+| DEBT-7 | The gateway bounds only time-to-headers (5 s); a body stalling after headers is bounded by the client (browser 10 s). Decide Reactor Netty's read timeout together with the `/ws` timeout | P4.C1 |
 | DEBT-4 | compose must set `stop_grace_period` ≥ 25 s (drain is 20 s/phase; Docker default 10 s SIGKILLs) and exec-form ENTRYPOINT so the JVM gets SIGTERM | P1.C4 |
 | DEBT-1 | Spring Boot 3.5 / Spring Cloud 2025.0 have been past OSS support since 2026-06-30, so no upstream CVE patches. Mitigation: override managed dependency versions (e.g. Tomcat, Netty, Jackson, PG driver) in the parent BOM when a fix exists; Trivy exceptions (P21) only with a reason and an expiry date | ADR only (I16); Boot 4 stays in V6 |
 
 ## Open ADRs
-- Accepted: ADR-001 (repo structure/build model), ADR-002 (stack pins, tool choices, D1, D2), ADR-003 (observability baseline, W3C trace-id correlation).
+- Accepted: ADR-001 (repo structure/build model), ADR-002 (stack pins, tool choices, D1, D2), ADR-003 (observability baseline, W3C trace-id correlation), ADR-023 (gateway routing, timeouts, edge errors; takes 023 because §7 reserves 001–021 and 022 is earmarked for D3).
 - Proposed, not written: ADR-022, CLAUDE.md split (D3, agent playbook §5). Your call; it changes the frozen MP.
 - Pending your decision: a committed `.claude/settings.json` allowlist (`./mvnw`, `docker compose`, read-only git; playbook §4). The agent was blocked from granting its own permissions, which is correct. Steps were given in the P1.C2 report: approve a one-off write in default mode, or add the rules via `/permissions` → Project settings.
