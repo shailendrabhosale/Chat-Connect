@@ -1,7 +1,7 @@
 # PROJECT_STATE (the only memory, MP §5)
 
-**Last done:** P1.C4: per-service multi-stage Dockerfiles (layered jar, uid 10001, exec-form ENTRYPOINT), `deploy/compose/compose.yaml` `core` profile (readiness healthchecks, 512m limits, 30 s stop grace, read-only root FS, loopback-only ports), `deploy/compose/smoke-core.sh`, ADR-004; DEBT-4 closed. AT: `docker compose --profile core up -d --wait` → all 3 healthy; SIGTERM stop exits 143. `./mvnw -q verify` green (72 tests, also with the stack holding 8080-8082) · 2026-11-27 · branch `p1-c4`
-**Next:** `GO P1.C5` (GHA path-filtered build/test, gitleaks, branch protection; needs a GitHub remote)
+**Last done:** P1.C5: GitHub remote `shailendrabhosale/Chat-Connect` (public, D5). CI `ci.yml` = changed-module `./mvnw verify` matrix + gitleaks (PR range / main history) → one aggregate `required` check. Branch protection on `main`: `required` bound to github-actions, PR mandatory, `enforce_admins`, linear history. ADR-024. AT: PR #2 (failing test) and PR #3 (fake secret) both blocked, and a direct push is rejected (GH006) · 2026-11-27
+**Next:** `REVIEW P1` (phase end: audit vs ATs, §1, §6), then tag `p1-done`. Merge flow from now on: branch → PR → green `required` → `gh pr merge <n> --squash`
 **Version / tag:** pre-V1 · none
 
 ## Stack pins (I16; recorded in ADR-002)
@@ -28,6 +28,7 @@
 | Working folder | **`~/code/chatconnect`** (WSL), branch `main`, synced to `9d132b7`; git `filemode=true`, `ignorecase=false`, `autocrlf=input`; no remote yet (GitHub at P1.C5) | done |
 | Previous folder | `D:\SHAILU\Projects\chatconnect`: holds `9d132b7` only and won't receive further work | yours to archive or delete |
 | Claude Code CLI in WSL | installed | done |
+| GitHub | remote `origin` = `https://github.com/shailendrabhosale/Chat-Connect` (public). `gh` 2.45.0 signed in with a classic token (scopes `repo`, `workflow`, `read:org`, `gist`; 30 days → **renew ~2026-12-27**). `gh auth setup-git` is the git credential helper. Device login (`--web`) fails with `slow_down` on this gh version | done |
 | IntelliJ | — | open `\\wsl.localhost\Ubuntu\home\algosatan\code\chatconnect` with the WSL JDK 17 as project SDK |
 | Docker Desktop ports | published ports are bound on **Windows**, so a port free in WSL can still be busy (18080 was, PID 18008). Check both sides: `ss -tln` and `netstat.exe -ano`. Containers reach a WSL-run JVM only via the WSL eth0 IP, not via `host.docker.internal` (ADR-004) | known |
 | Shell | `~/.bashrc` line 119 `cd /mnt/d/shailu/prog_practices/java/` | note: new WSL terminals start on /mnt/d, so `cd ~/code/chatconnect` first |
@@ -87,6 +88,8 @@ Rule (ADR-004): core + at most 2 heavy profiles at once. IDE workflow: stop the 
 | gateway image cold build | 54 s | `docker build -f services/gateway/Dockerfile .` (empty Maven cache) | same | 2026-11-27 |
 | container SIGTERM stop | 0.3–0.5 s, exit 143 (shell-form ENTRYPOINT: 5.3 s, exit 137, no drain) | `smoke-core.sh`; `docker stop -t 5` probe | same | 2026-11-27 |
 
+| CI first full run (PR #1) | builds 35–47 s (3 modules in parallel), gitleaks 11 s, `changes` 3 s; 72 tests, 0 skipped | GitHub Actions, ubuntu-24.04 | GitHub-hosted runner | 2026-11-27 |
+
 **Measurement rule (I15):** on this host, curl 8.5.0's `time_total` under-reports by 0.2–0.4 s (4.62–4.80 s against 5.00 s server-side). Take timings from server-side durations or a monotonic wrapper, never from curl.
 
 ## Known debt
@@ -102,6 +105,6 @@ Rule (ADR-004): core + at most 2 heavy profiles at once. IDE workflow: stop the 
 | DEBT-1 | Spring Boot 3.5 / Spring Cloud 2025.0 have been past OSS support since 2026-06-30, so no upstream CVE patches. Mitigation: override managed dependency versions (e.g. Tomcat, Netty, Jackson, PG driver) in the parent BOM when a fix exists; Trivy exceptions (P21) only with a reason and an expiry date | ADR only (I16); Boot 4 stays in V6 |
 
 ## Open ADRs
-- Accepted: ADR-001 (repo structure/build model), ADR-002 (stack pins, tool choices, D1, D2), ADR-003 (observability baseline, W3C trace-id correlation), ADR-004 (container images, local resource budget), ADR-023 (gateway routing, timeouts, edge errors; takes 023 because §7 reserves 001–021 and 022 is earmarked for D3).
+- Accepted: ADR-001 (repo structure/build model), ADR-002 (stack pins, tool choices, D1, D2), ADR-003 (observability baseline, W3C trace-id correlation), ADR-004 (container images, local resource budget), ADR-024 (CI pipeline, merge gate), ADR-023 (gateway routing, timeouts, edge errors; takes 023 because §7 reserves 001–021 and 022 is earmarked for D3).
 - Proposed, not written: ADR-022, CLAUDE.md split (D3, agent playbook §5). Your call; it changes the frozen MP.
 - ~~Pending: `.claude/settings.json` allowlist~~ **Done 2026-11-27:** committed with `./mvnw`, the non-destructive `docker compose` subcommands (up/ps/logs/config/build/stop) and read-only git (status/diff/log/show). `docker compose down` and `git branch` stay behind prompts (`down -v` deletes volumes, `branch -D` deletes branches). Gap: `docker compose --profile … <cmd>` doesn't match these prefixes, so it still prompts.
