@@ -20,6 +20,16 @@
       <artifactId>spring-boot-starter-web</artifactId>
     </dependency>
 
+    <!-- I10: probes, ECS logs, W3C traceId (ADR-003). No exporter until P20. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-bridge-otel</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>

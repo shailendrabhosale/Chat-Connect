@@ -1,6 +1,41 @@
 spring:
   application:
     name: auth-service
+  lifecycle:
+    # Per shutdown phase. Must stay below the orchestrator's kill deadline: compose
+    # stop_grace_period (P1.C4) and k8s terminationGracePeriodSeconds (30 s default).
+    timeout-per-shutdown-phase: 20s
 
 server:
   port: ${SERVER_PORT:8081}
+  # Boot 3.5 default; explicit because I10 depends on it.
+  shutdown: graceful
+
+logging:
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        environment: ${APP_ENV:local}
+        # Container hostname = replica identity once services scale out.
+        node-name: ${HOSTNAME:local}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      # Off by default outside Kubernetes. Liveness = process only; readiness gains
+      # critical dependencies (DB, broker) as they arrive.
+      probes:
+        enabled: true
+  tracing:
+    # MP §6: 100% locally. No exporter until P20, so spans cost only CPU.
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    propagation:
+      # W3C traceparent only (I10). The default also accepts B3 headers.
+      type: w3c

@@ -1,7 +1,7 @@
 # PROJECT_STATE (the only memory, MP §5)
 
-**Last done:** P1.C1: BOM-only parent (Boot 3.5.16 + Spring Cloud 2025.0.3), modules gateway/auth-service/chat-service (context-load smoke tests), `./mvnw` (Maven 3.9.16, sha256-pinned), enforcer Java `[17,18)`, ADR-001/002. AT `./mvnw -q verify` green in WSL (33 s, 3/3 tests) · 2026-11-27 · branch `p1-c1`
-**Next:** `GO P1.C2` (actuator liveness/readiness, ECS JSON logs, Micrometer Tracing, X-Trace-Id, graceful shutdown)
+**Last done:** P1.C2: actuator liveness/readiness, ECS JSON logs, Micrometer Tracing (OTel bridge, W3C only, no exporter), `X-Trace-Id` response header + ECS access log, explicit graceful shutdown (20 s/phase), ADR-003. AT: readiness `{"status":"UP"}` via curl on 8080/8081/8082; 55/55 log lines JSON; every request line carries the response's traceId; SIGTERM → graceful. `./mvnw -q verify` green (45 tests) · 2026-11-27 · branch `p1-c2`
+**Next:** `GO P1.C3` (gateway static routes `/api/auth/**`, `/api/chat/**`, timeouts)
 **Version / tag:** pre-V1 · none
 
 ## Stack pins (I16; recorded in ADR-002)
@@ -42,10 +42,11 @@
 ## Services
 | Name | Module | Port | DB | Replicas | State |
 |---|---|---|---|---|---|
-| gateway | `services/gateway` (Spring Cloud Gateway, WebFlux) | 8080 | — | 1 | shell, no routes (P1.C3) |
-| auth-service | `services/auth-service` (Spring MVC) | 8081 | — (PG at P2) | 1 | shell |
-| chat-service | `services/chat-service` (Spring MVC) | 8082 | — (PG at P3) | 1 | shell |
+| gateway | `services/gateway` (Spring Cloud Gateway, WebFlux) | 8080 | — | 1 | probes + trace header + ECS logs; no routes (P1.C3) |
+| auth-service | `services/auth-service` (Spring MVC) | 8081 | — (PG at P2) | 1 | probes + trace header + ECS logs |
+| chat-service | `services/chat-service` (Spring MVC) | 8082 | — (PG at P3) | 1 | probes + trace header + ECS logs |
 
+Endpoints on every service: `/actuator/health/liveness`, `/actuator/health/readiness` (only `health` exposed). Every response carries `X-Trace-Id`.
 Package root `dev.chatconnect.*`; groupId `dev.chatconnect`; version `0.1.0-SNAPSHOT`.
 
 ## Topics
@@ -58,6 +59,9 @@ none (P2).
 | Name | Service | Secret? | Where set |
 |---|---|---|---|
 | SERVER_PORT | all | no | optional override; defaults 8080/8081/8082 in `application.yml` |
+| APP_ENV | all | no | ECS `service.environment`; default `local` |
+| TRACING_SAMPLING_PROBABILITY | all | no | default `1.0`; prod 0.1 at P20 (trace IDs are logged even when unsampled) |
+| HOSTNAME | all (read) | no | ECS `service.node.name`; set by Docker/K8s; default `local` |
 
 ## Compose profiles
 none (`core` at P1.C4).
@@ -69,10 +73,12 @@ none (`core` at P1.C4).
 ## Known debt
 | ID | Item | Fix-by |
 |---|---|---|
-| DEBT-2 | I10 (probes, ECS logs, traceId, graceful shutdown) not in the shells yet; by roadmap design | P1.C2 |
+| ~~DEBT-2~~ | ~~I10 not in the shells~~: closed at P1.C2 | done |
+| DEBT-3 | gateway `/actuator/health` reachable on the public port (details-free); Caddy must block `/actuator/*` | P6.C2 |
+| DEBT-4 | compose must set `stop_grace_period` ≥ 25 s (drain is 20 s/phase; Docker default 10 s SIGKILLs) and exec-form ENTRYPOINT so the JVM gets SIGTERM | P1.C4 |
 | DEBT-1 | Spring Boot 3.5 / Spring Cloud 2025.0 have been past OSS support since 2026-06-30, so no upstream CVE patches. Mitigation: override managed dependency versions (e.g. Tomcat, Netty, Jackson, PG driver) in the parent BOM when a fix exists; Trivy exceptions (P21) only with a reason and an expiry date | ADR only (I16); Boot 4 stays in V6 |
 
 ## Open ADRs
-- Accepted: ADR-001 (repo structure/build model), ADR-002 (stack pins, tool choices, D1, D2).
+- Accepted: ADR-001 (repo structure/build model), ADR-002 (stack pins, tool choices, D1, D2), ADR-003 (observability baseline, W3C trace-id correlation).
 - Proposed, not written: ADR-022, CLAUDE.md split (D3, agent playbook §5). Your call; it changes the frozen MP.
-- Pending your decision: a committed `.claude/settings.json` allowlist (`./mvnw`, `docker compose`, read-only git; playbook §4). The agent was blocked from granting its own permissions, which is correct, so add it yourself if you want it.
+- Pending your decision: a committed `.claude/settings.json` allowlist (`./mvnw`, `docker compose`, read-only git; playbook §4). The agent was blocked from granting its own permissions, which is correct. Steps were given in the P1.C2 report: approve a one-off write in default mode, or add the rules via `/permissions` → Project settings.
