@@ -1,0 +1,11 @@
+# Keeps the SHA-pinned actions current (ADR-024). Maven is deliberately absent: the Boot/Cloud
+# line is pinned by I16, and CVE overrides are manual (DEBT-1).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

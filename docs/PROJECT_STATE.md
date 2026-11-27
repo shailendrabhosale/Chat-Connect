@@ -39,6 +39,7 @@
 - ~~D2: Docker runtime~~ **Decided 2026-11-27: Docker Desktop's engine** (already installed). It stands in for MP §0's "Docker Engine inside WSL2". Trade-offs: Desktop's Windows-side processes use some RAM, and the prod VM (P6) will run plain Docker Engine, so compose files must not rely on Desktop-only features such as `host.docker.internal`.
 - **D3: CLAUDE.md size.** It's 35 KB / 5,579 words, loaded every turn. Splitting it needs an ADR; see the agent playbook.
 - ~~D4: where builds run~~ **Decided 2026-11-27: WSL, working folder `~/code/chatconnect`**, which matches MP §0. Files, JDK, Maven, git, Docker socket and the Claude Code CLI all stay on the WSL side. Avoid building from `/mnt/d` or editing through `\\wsl.localhost` with Windows tools, since cross-boundary file IO is slow. IntelliJ's WSL support is the exception.
+- ~~D5: cost and repo visibility~~ **Decided 2026-11-27: zero cost.** The GitHub repo is **public**: free hosted Actions runners and free branch protection (a private repo on GitHub Free spends paid minutes, $12/month included). Free tiers only from here on, including the P6 VM. Before the first push, gitleaks v8.30.1 scanned all history (8 commits) and the working tree: no leaks. Published with the repo: commit email `shailu.codes@gmail.com` and local paths in docs.
 
 ## Services
 | Name | Module | Port | DB | Replicas | State |
