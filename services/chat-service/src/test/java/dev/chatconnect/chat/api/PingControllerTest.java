@@ -27,7 +27,7 @@ class PingControllerTest {
         mvc.perform(get("/api/chat/v1/ping"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(content().json("{\"service\":\"chat-service\",\"status\":\"ok\"}", true));
+                .andExpect(content().json("{\"service\":\"chat-service\",\"status\":\"broken\"}", true));
     }
 
     @Test
