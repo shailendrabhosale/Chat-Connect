@@ -1,0 +1,23 @@
+# Build output
+target/
+.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets: never committed (I11). Keys arrive as mounted files at P2.C3.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.jks
+
+# Claude Code per-user settings
+.claude/settings.local.json
