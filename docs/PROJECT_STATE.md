@@ -23,7 +23,7 @@
 | Docker | Docker Desktop engine 29.9.3; WSL integration for Ubuntu on (`/var/run/docker.sock` present); its disk image is no longer under `%LOCALAPPDATA%\Docker\wsl\disk` (moved; new location not checked) | done |
 | Ubuntu disk | still on C: (`%LOCALAPPDATA%\wsl\{03fdfa68…}`) | optional: `wsl --shutdown`, then `wsl --manage Ubuntu --move D:\WSL\Ubuntu` |
 | Maven | system 3.8.7 in WSL; project uses `./mvnw` → 3.9.16 | ok |
-| `unzip` in WSL | **absent**; `mvnw` then switches to `.tar.gz` and fails the pinned zip checksum. Worked around on 2026-11-27 by placing the SHA-512-verified 3.9.16 zip in `~/.m2/wrapper/dists` | **todo**: `sudo apt install -y unzip` |
+| `unzip` in WSL | installed 2026-11-27; `./mvnw` downloads + checksum-verifies Maven 3.9.16 from a clean cache | done |
 | Node | absent | needed by P5 |
 | Working folder | **`~/code/chatconnect`** (WSL), branch `main`, synced to `9d132b7`; git `filemode=true`, `ignorecase=false`, `autocrlf=input`; no remote yet (GitHub at P1.C5) | done |
 | Previous folder | `D:\SHAILU\Projects\chatconnect`: holds `9d132b7` only and won't receive further work | yours to archive or delete |
