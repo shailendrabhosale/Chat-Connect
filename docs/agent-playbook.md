@@ -3,9 +3,8 @@
 Written 2026-11-27, before P1. Re-check prices and plan limits whenever this file is used to make a cost call.
 
 ## 1. Where the agent runs
-- **Run the agent on the same side as the files and toolchain (PROJECT_STATE D4).** Windows-native on `D:\SHAILU\Projects\chatconnect`: this desktop app session (PowerShell/Git Bash) works directly. WSL: the `claude` CLI in a WSL terminal in the WSL working folder. The mixed setups are the slow ones: WSL tools on `/mnt/d`, or Windows tools on `\\wsl.localhost` paths.
-- If builds run on Windows, mark `mvnw` executable in git at P1.C1 (`git update-index --chmod=+x mvnw`). Windows git runs with `filemode=false`, and the Linux CI runner needs the bit.
-- If D4 = WSL, the parent `D:\SHAILU\CLAUDE.md` guidelines stop loading. If you want them, copy them into `~/.claude/CLAUDE.md` inside WSL. They conflict in one place: the parent says "present interpretations, don't pick silently", while MP §5 says "decide, log ADR, move on" for everything that isn't IRREVERSIBLE. Inside this project the MP is the more specific rule, so it wins.
+- **Run the `claude` CLI in a WSL terminal at `~/code/chatconnect` (PROJECT_STATE D4).** That's where the files, JDK 17, git (`filemode=true`, so `mvnw` keeps its exec bit), and the Docker socket for Testcontainers all live. Windows-side sessions on this repo would have to go through `\\wsl.localhost` or `wsl.exe`, which is slow and error-prone.
+- The parent `D:\SHAILU\CLAUDE.md` guidelines don't load in WSL. If you want them, copy them into `~/.claude/CLAUDE.md` inside WSL. They conflict in one place: the parent says "present interpretations, don't pick silently", while MP §5 says "decide, log ADR, move on" for everything that isn't IRREVERSIBLE. Inside this project the MP is the more specific rule, so it wins.
 
 ## 2. Model × effort by checkpoint class
 Relative Anthropic API list prices per MTok (in/out; skill cache dated 2026-11-03): Haiku 5.5 $0.10/$0.50 · Sonnet 5.5 $2/$10 · Opus 5.5 $4/$20 · Fable 5.2 $8/$40. **Subscription usage limits were not checked.** Look at your plan's usage page before committing to an Opus-heavy schedule.

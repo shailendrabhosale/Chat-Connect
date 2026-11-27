@@ -255,7 +255,7 @@ sequenceDiagram
 
 | Stage | Where | Orchestration | Notes |
 |---|---|---|---|
-| Local | Docker Desktop engine (D2); toolchain on Windows or WSL per D4 | Compose profiles `core` / `events` / `data` / `obs` | the service under work runs from IntelliJ; core + at most 2 heavy profiles |
+| Local | WSL2 Ubuntu toolchain at `~/code/chatconnect` (D4), Docker Desktop engine via WSL integration (D2) | Compose profiles `core` / `events` / `data` / `obs` | the service under work runs from IntelliJ; core + at most 2 heavy profiles |
 | V1–V3 | one cloud VM | Compose + Caddy | provider chosen at P6.C1 after checking current limits online |
 | V4+ | same VM | k3s + Kustomize | datastores stay in Compose locally (ADR-020) |
 
