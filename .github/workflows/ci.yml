@@ -71,13 +71,18 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: scan full history (I11)
+      - name: scan for secrets (I11)
+        # Scope matters: gitleaks scans *all refs* by default, and fetch-depth 0 fetches every
+        # branch, so a leak on one branch failed every other PR (seen on PR #2). A PR scans only
+        # its own commits; a push to main scans main's full history.
         # The official image pinned by digest: no third-party action and no licence key.
         # Same uid as the checkout, or git refuses the repo ("dubious ownership").
+        env:
+          LOG_OPTS: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || 'HEAD' }}
         run: >-
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/repo:ro"
           ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
-          git /repo --redact --no-banner --exit-code 1
+          git /repo --log-opts="$LOG_OPTS" --redact --no-banner --exit-code 1
 
   required:
     name: required
