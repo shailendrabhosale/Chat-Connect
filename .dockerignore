@@ -1,0 +1,19 @@
+# Build context = repo root (ADR-004). Deny by default: only what an image build needs gets in,
+# so a stray .env, key or IDE file can never reach the build context (I11).
+*
+!pom.xml
+!mvnw
+!.mvn/wrapper/maven-wrapper.properties
+!services/
+
+# Inside services/: no build output, no tests (images build with -Dmaven.test.skip=true, so
+# test-only edits don't invalidate image layers), no secrets.
+services/*/target/
+services/*/src/test/
+**/*.iml
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.jks

@@ -1,0 +1,103 @@
+# ChatConnect local stack (ADR-004). Run from this directory:
+#   docker compose --profile core up -d --build --wait
+# Profiles: core = gateway + services (P1); events, data, obs arrive with their phases.
+# Rule: core + at most 2 heavy profiles at once; the service under work runs from IntelliJ.
+#
+# IDE workflow (ADR-004), e.g. chat-service:
+#   docker compose --profile core stop chat-service        # first: frees :8082, also inside WSL
+#   (start ChatServiceApplication in IntelliJ, on :8082)
+#   CHAT_SERVICE_URI=http://$(hostname -I | awk '{print $1}'):8082 \
+#     docker compose --profile core up -d gateway          # gateway -> the IDE-run JVM
+#   docker compose --profile core up -d gateway chat-service   # back to all-in-compose
+# Not host.docker.internal: on Docker Desktop it resolves to the Windows host, not the WSL
+# distro, so it can't reach a JVM running in WSL (measured; ADR-004).
+name: chatconnect
+
+x-common-env: &common-env
+  APP_ENV: ${APP_ENV:-local}
+
+x-spring-service: &spring-service
+  profiles: ["core"]
+  restart: unless-stopped
+  # DEBT-4: services drain for up to 20 s per shutdown phase; Docker's default 10 s would SIGKILL.
+  stop_grace_period: 30s
+  # MP §3 range 384-512m; JVM heap = 75% (ENTRYPOINT). Swap off so an overrun fails loudly.
+  mem_limit: 512m
+  memswap_limit: 512m
+  cpus: 2.0
+  # Hardening: immutable root FS, noexec /tmp (Tomcat work dir, hsperfdata), no capabilities.
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+x-build-args: &build-args
+  GIT_SHA: ${GIT_SHA:-dev}
+  APP_VERSION: ${APP_VERSION:-dev}
+
+services:
+  gateway:
+    <<: *spring-service
+    image: chatconnect/gateway:${IMAGE_TAG:-dev}
+    build:
+      context: ../..
+      dockerfile: services/gateway/Dockerfile
+      args: *build-args
+    environment:
+      <<: *common-env
+      # Overridable for the IDE workflow (see the header).
+      AUTH_SERVICE_URI: ${AUTH_SERVICE_URI:-http://auth-service:8081}
+      CHAT_SERVICE_URI: ${CHAT_SERVICE_URI:-http://chat-service:8082}
+    # No depends_on: the gateway tolerates absent upstreams (503, ADR-023), and a hard dependency
+    # would restart a service you stopped to run it from the IDE.
+    ports: ["127.0.0.1:8080:8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
+
+  auth-service:
+    <<: *spring-service
+    image: chatconnect/auth-service:${IMAGE_TAG:-dev}
+    build:
+      context: ../..
+      dockerfile: services/auth-service/Dockerfile
+      args: *build-args
+    environment:
+      <<: *common-env
+    # Loopback only: Docker-published ports bypass host firewalls, so never bind 0.0.0.0.
+    ports: ["127.0.0.1:8081:8081"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8081/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
+
+  chat-service:
+    <<: *spring-service
+    image: chatconnect/chat-service:${IMAGE_TAG:-dev}
+    build:
+      context: ../..
+      dockerfile: services/chat-service/Dockerfile
+      args: *build-args
+    environment:
+      <<: *common-env
+    ports: ["127.0.0.1:8082:8082"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8082/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s

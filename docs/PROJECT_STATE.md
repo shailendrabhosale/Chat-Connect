@@ -1,7 +1,7 @@
 # PROJECT_STATE (the only memory, MP §5)
 
-**Last done:** P1.C3: gateway static routes `/api/auth/**` → auth, `/api/chat/**` → chat (paths unchanged, no retries); connect 1 s, response 5 s, pool idle 15 s; RFC 7807 edge errors (503/504/502/404/500, `Cache-Control: no-store`, no internal addresses); `GET /api/{auth,chat}/v1/ping`; ADR-023. AT: `curl :8080/api/{chat,auth}/v1/ping` → 200, with the same traceId in the gateway and service logs. `./mvnw -q verify` green (72 tests) · 2026-11-27 · branch `p1-c3`
-**Next:** `GO P1.C4` (multi-stage Dockerfiles, compose `core` profile, healthchecks, mem limits, ADR-004; closes DEBT-4)
+**Last done:** P1.C4: per-service multi-stage Dockerfiles (layered jar, uid 10001, exec-form ENTRYPOINT), `deploy/compose/compose.yaml` `core` profile (readiness healthchecks, 512m limits, 30 s stop grace, read-only root FS, loopback-only ports), `deploy/compose/smoke-core.sh`, ADR-004; DEBT-4 closed. AT: `docker compose --profile core up -d --wait` → all 3 healthy; SIGTERM stop exits 143. `./mvnw -q verify` green (72 tests, also with the stack holding 8080-8082) · 2026-11-27 · branch `p1-c4`
+**Next:** `GO P1.C5` (GHA path-filtered build/test, gitleaks, branch protection; needs a GitHub remote)
 **Version / tag:** pre-V1 · none
 
 ## Stack pins (I16; recorded in ADR-002)
@@ -29,6 +29,7 @@
 | Previous folder | `D:\SHAILU\Projects\chatconnect`: holds `9d132b7` only and won't receive further work | yours to archive or delete |
 | Claude Code CLI in WSL | installed | done |
 | IntelliJ | — | open `\\wsl.localhost\Ubuntu\home\algosatan\code\chatconnect` with the WSL JDK 17 as project SDK |
+| Docker Desktop ports | published ports are bound on **Windows**, so a port free in WSL can still be busy (18080 was, PID 18008). Check both sides: `ss -tln` and `netstat.exe -ano`. Containers reach a WSL-run JVM only via the WSL eth0 IP, not via `host.docker.internal` (ADR-004) | known |
 | Shell | `~/.bashrc` line 119 `cd /mnt/d/shailu/prog_practices/java/` | note: new WSL terminals start on /mnt/d, so `cd ~/code/chatconnect` first |
 
 **P0 AT (in WSL), 2026-11-27:** `java`/`javac` 17.0.21 ✓ · `docker info` → 29.9.3 Docker Desktop ✓ · 9,944 MiB RAM ✓ · branch `main` ✓
@@ -42,9 +43,9 @@
 ## Services
 | Name | Module | Port | DB | Replicas | State |
 |---|---|---|---|---|---|
-| gateway | `services/gateway` (Spring Cloud Gateway, WebFlux) | 8080 | — | 1 | routes `/api/auth/**`, `/api/chat/**`; timeouts + RFC 7807 edge errors (ADR-023) |
-| auth-service | `services/auth-service` (Spring MVC) | 8081 | — (PG at P2) | 1 | `GET /api/auth/v1/ping` |
-| chat-service | `services/chat-service` (Spring MVC) | 8082 | — (PG at P3) | 1 | `GET /api/chat/v1/ping` |
+| gateway | `services/gateway` (Spring Cloud Gateway, WebFlux) | 8080 | — | 1 | routes `/api/auth/**`, `/api/chat/**`; timeouts + RFC 7807 edge errors (ADR-023); image `chatconnect/gateway` |
+| auth-service | `services/auth-service` (Spring MVC) | 8081 | — (PG at P2) | 1 | `GET /api/auth/v1/ping`; image `chatconnect/auth-service` |
+| chat-service | `services/chat-service` (Spring MVC) | 8082 | — (PG at P3) | 1 | `GET /api/chat/v1/ping`; image `chatconnect/chat-service` |
 
 Endpoints on every service: `/actuator/health/liveness`, `/actuator/health/readiness` (only `health` exposed). Every response carries `X-Trace-Id`.
 Package root `dev.chatconnect.*`; groupId `dev.chatconnect`; version `0.1.0-SNAPSHOT`.
@@ -62,17 +63,28 @@ none (P2).
 | APP_ENV | all | no | ECS `service.environment`; default `local` |
 | TRACING_SAMPLING_PROBABILITY | all | no | default `1.0`; prod 0.1 at P20 (trace IDs are logged even when unsampled) |
 | HOSTNAME | all (read) | no | ECS `service.node.name`; set by Docker/K8s; default `local` |
-| AUTH_SERVICE_URI | gateway | no | route target; default `http://localhost:8081`; compose sets the service DNS name (P1.C4) |
-| CHAT_SERVICE_URI | gateway | no | route target; default `http://localhost:8082`; compose sets the service DNS name (P1.C4) |
+| AUTH_SERVICE_URI | gateway | no | route target; default `http://localhost:8081`; compose default `http://auth-service:8081` |
+| CHAT_SERVICE_URI | gateway | no | route target; default `http://localhost:8082`; compose default `http://chat-service:8082`, overridden to the WSL IP in the IDE workflow |
+| GIT_SHA, APP_VERSION | compose build args | no | OCI `revision`/`version` labels; default `dev` (the smoke script sets GIT_SHA) |
+| IMAGE_TAG | compose | no | image tag; default `dev` (GHCR + sha tags at P6.C2) |
 
 ## Compose profiles
-none (`core` at P1.C4).
+| Profile | Services | Since | Run |
+|---|---|---|---|
+| core | gateway, auth-service, chat-service | P1.C4 | `cd deploy/compose && docker compose --profile core up -d --build --wait`; full AT: `deploy/compose/smoke-core.sh` |
+
+Rule (ADR-004): core + at most 2 heavy profiles at once. IDE workflow: stop the service's container first, then point the gateway at `http://$(hostname -I | awk '{print $1}'):<port>`.
 
 ## Measurements
 | Metric | Value | Command | Env | Date |
 |---|---|---|---|---|
 | gateway hung-connect → 503 | ~1.03 s (warm), one attempt | `GatewayConnectTimeoutTest` (`@RepeatedTest(3)` probe) | WSL2, local jars | 2026-11-27 |
 | gateway slow-upstream → 504 | 5.003–5.045 s gateway-side | 3 × `curl :8090/api/chat/v1/ping` against a 7 s stub; ECS `event.duration` + monotonic wrapper | WSL2, local jars | 2026-11-27 |
+
+| core profile idle memory | gateway 176–190 MiB, auth 123–150 MiB, chat 128–130 MiB (limits 3 × 512 MiB) | `docker stats --no-stream` in `smoke-core.sh` | Docker Desktop 29.9.3, WSL2, 2 runs | 2026-11-27 |
+| core profile up → all healthy | 12.6 s (images cached); 28.5 s incl. image rebuilds with a warm Maven cache | `smoke-core.sh` (`up --build --wait`) | same | 2026-11-27 |
+| gateway image cold build | 54 s | `docker build -f services/gateway/Dockerfile .` (empty Maven cache) | same | 2026-11-27 |
+| container SIGTERM stop | 0.3–0.5 s, exit 143 (shell-form ENTRYPOINT: 5.3 s, exit 137, no drain) | `smoke-core.sh`; `docker stop -t 5` probe | same | 2026-11-27 |
 
 **Measurement rule (I15):** on this host, curl 8.5.0's `time_total` under-reports by 0.2–0.4 s (4.62–4.80 s against 5.00 s server-side). Take timings from server-side durations or a monotonic wrapper, never from curl.
 
@@ -84,10 +96,11 @@ none (`core` at P1.C4).
 | DEBT-5 | SCG appends the client's `X-Forwarded-For`; IP-keyed logic (login throttle, rate limits) must use the right-most trusted hop, never the left-most | P2.C2 |
 | DEBT-6 | Deadline nesting: architecture §5.1 proposes PG `statement_timeout` 5 s + pool acquire 2 s behind a 5 s gateway timeout, which breaks §5.1's own rule. Set e.g. acquire 1 s, `statement_timeout` 3 s | P2.C1 |
 | DEBT-7 | The gateway bounds only time-to-headers (5 s); a body stalling after headers is bounded by the client (browser 10 s). Decide Reactor Netty's read timeout together with the `/ws` timeout | P4.C1 |
-| DEBT-4 | compose must set `stop_grace_period` ≥ 25 s (drain is 20 s/phase; Docker default 10 s SIGKILLs) and exec-form ENTRYPOINT so the JVM gets SIGTERM | P1.C4 |
+| ~~DEBT-4~~ | ~~stop grace + exec-form ENTRYPOINT~~: closed at P1.C4 (30 s grace, exec form, exit 143 asserted by `smoke-core.sh`) | done |
+| DEBT-8 | Container memory and transport are proven idle only: 75% heap + 64m direct (gateway) inside 512m, and NIO chosen over epoll (noexec `/tmp`). Validate under k6 (watch exit 137 / `OOMKilled`) and measure epoll vs NIO | P6.C3 |
 | DEBT-1 | Spring Boot 3.5 / Spring Cloud 2025.0 have been past OSS support since 2026-06-30, so no upstream CVE patches. Mitigation: override managed dependency versions (e.g. Tomcat, Netty, Jackson, PG driver) in the parent BOM when a fix exists; Trivy exceptions (P21) only with a reason and an expiry date | ADR only (I16); Boot 4 stays in V6 |
 
 ## Open ADRs
-- Accepted: ADR-001 (repo structure/build model), ADR-002 (stack pins, tool choices, D1, D2), ADR-003 (observability baseline, W3C trace-id correlation), ADR-023 (gateway routing, timeouts, edge errors; takes 023 because §7 reserves 001–021 and 022 is earmarked for D3).
+- Accepted: ADR-001 (repo structure/build model), ADR-002 (stack pins, tool choices, D1, D2), ADR-003 (observability baseline, W3C trace-id correlation), ADR-004 (container images, local resource budget), ADR-023 (gateway routing, timeouts, edge errors; takes 023 because §7 reserves 001–021 and 022 is earmarked for D3).
 - Proposed, not written: ADR-022, CLAUDE.md split (D3, agent playbook §5). Your call; it changes the frozen MP.
 - ~~Pending: `.claude/settings.json` allowlist~~ **Done 2026-11-27:** committed with `./mvnw`, the non-destructive `docker compose` subcommands (up/ps/logs/config/build/stop) and read-only git (status/diff/log/show). `docker compose down` and `git branch` stay behind prompts (`down -v` deletes volumes, `branch -D` deletes branches). Gap: `docker compose --profile … <cmd>` doesn't match these prefixes, so it still prompts.

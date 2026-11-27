@@ -43,7 +43,6 @@ class GracefulShutdownTest {
         CountDownLatch entered = new CountDownLatch(1);
         List<ReadinessState> readiness = new CopyOnWriteArrayList<>();
         ConfigurableApplicationContext app = new SpringApplicationBuilder(ChatServiceApplication.class)
-                .properties("server.port=0")
                 // Functional bean, not a @RestController: test classes sit inside the component-scan root.
                 .initializers(ctx -> ((GenericApplicationContext) ctx)
                         .registerBean("slowRoute", RouterFunction.class, () -> slowRoute(entered)))
@@ -53,7 +52,9 @@ class GracefulShutdownTest {
                         readiness.add(state);
                     }
                 })
-                .run();
+                // A command-line arg, not .properties(): builder properties are *defaults* and lose to
+                // application.yml's ${SERVER_PORT:808x}, which made this bind the real port.
+                .run("--server.port=0");
         int port = ((WebServerApplicationContext) app).getWebServer().getPort();
 
         CompletableFuture<HttpResponse<String>> inFlight = HttpClient.newHttpClient()
